@@ -51,8 +51,9 @@ class TaskDrawer {
       .attr("r", ir)
       .attr("cx", pos.x)
       .attr("cy", pos.y);
+    const textPos = pos.add(new V2(or, 0));
     this.text
-      .attr("transform", "translate(" + pos.x + "," + pos.y + ")");
+      .attr("transform", "translate(" + textPos.x + "," + textPos.y + ")");
   }
 }
 
@@ -88,6 +89,19 @@ class LineDrawer {
   }
 }
 
+function prepare(tasks) {
+  var levels = buildLevels(tasks, (o) => o[0])
+  const levelSizes = levels.map(l => l.length)
+  const cs = levelsToCoordinates(new Rect(0, 0, 900, 700), levelSizes);
+  levels = levels.map((level, i) => {
+    return level.map((el, j) => {
+      return [el, cs.at(i).at(j)]
+    });
+  });
+  levels = levels.flat();
+  return levels;
+}
+
 window.onload = (e) => {
   const levelsRaw = [
     [0, 1], [0, 2], 
@@ -95,18 +109,9 @@ window.onload = (e) => {
     [2, 7], [2, 8], [2, 9], [2, 10],
     [3, 11]
   ];
-  var levels = buildLevels(levelsRaw, (o) => o[0])
-  const levelSizes = levels.map(l => l.length)
-  const cs = levelsToCoordinates(new Rect(0, 0, 900, 700), levelSizes);
-  //const cs = circleLevelsToCoordinates(new Rect(0, 0, 1000, 1000), levelSizes);
-  levels = levels.map((level, i) => {
-    return level.map((el, j) => {
-      return [el, cs.at(i).at(j)]
-    });
-  });
-  levels = levels.flat();
 
-  const points = cs.flat()
+  var levels = prepare(levelsRaw)
+  const points = levels.map((l) => l[1])
   const progress = [ 70, 50, 10, 20, 90, 10, 10, 10, 10, 10, 10 ]
 
   const r = 10;
@@ -149,8 +154,8 @@ window.onload = (e) => {
   var linesGroup = viewport.append("g");
   var circlesGroup = viewport.append("g");
   console.log(levels)
-  const circles = levels.map((p, i) => new TaskDrawer(circlesGroup, p[1], progress[i] / 100, i));
-  const lines = bindings.map((b, i) => 
+  var circles = levels.map((p, i) => new TaskDrawer(circlesGroup, p[1], (i % 10) / 10, i));
+  var lines = bindings.map((b, i) => 
     new LineDrawer(linesGroup, circles[b[0]].pos, circles[b[1]].pos))
 
   const update = () => {
@@ -166,4 +171,12 @@ window.onload = (e) => {
     .on("zoom", update);
 
   svg.call(zoom)
+    .on('click', () => {
+      if (d3.event.target.tagName == "svg") {
+        const e = d3.event;
+        console.log(d3.event)
+        const task = new TaskDrawer(circlesGroup, new V2(e.x, e.y), 0.7, '!');
+        circles.push(task)
+      }
+    });
 }
