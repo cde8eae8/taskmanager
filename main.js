@@ -1,18 +1,3 @@
-class V2 {
-  constructor(x, y) {
-    this.x = x;
-    this.y = y;
-  }
-
-  add(v) {
-    return new V2(this.x + v.x, this.y + v.y);
-  }
-
-  toString() {
-    return "(" + this.x + ", " + this.y + ")";
-  }
-};
-
 class Task {
   constructor(progress, text="task") {
     this.progress = progress
@@ -68,14 +53,20 @@ class TaskDrawer {
 }
 
 window.onload = (e) => {
-  const points = [
-      [100, 100],
-      [100, 400],
-      [400, 300],
-      [700, 200],
-      [600, 100]
-    ].map((v) => new V2(v[0], v[1]));
-  const progress = [ 70, 50, 10, 20, 90 ]
+  const levelsRaw = [
+    [0, 1], [0, 2], 
+    [1, 3], [1, 4], [1, 5], [1, 6], 
+    [2, 7], [2, 8], [2, 9], [2, 10],
+    [3, 11]
+  ];
+  const levels = buildLevels(levelsRaw, (o) => o[0])
+  const levelSizes = levels.map(l => l.length)
+  console.log(levelSizes)
+  const cs = levelsToCoordinates(new Rect(0, 0, 900, 700), levelSizes);
+  console.log(cs)
+
+  const points = cs.flat()
+  const progress = [ 70, 50, 10, 20, 90, 10, 10, 10, 10, 10, 10 ]
 
   const r = 10;
   const size = points.reduce(
