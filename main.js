@@ -5,23 +5,39 @@ class Task {
   }
 }
 
+class Events {
+  constructor() {
+    this.events = []
+  }
+
+  addEvent() {
+
+  }
+
+  processEvents() {
+
+  }
+}
+
 class TaskDrawer {
-  constructor(root, pos, progress, text) {
-    console.log(pos, text)
+  constructor(root, pos, progress, text, r, transform) {
     this.p = progress
-    this.g = root.append("g");
+    this.g = root.append("g")
+      .on('click', () => {
+        this.selected(!this._selected)
+      });
     this.outer = this.g.append("circle");
     this.arc = this.g.append("path")
         .attr("fill", "green");
     this.inner = this.g.append("circle");
-    this.outer_r = 40;
-    this.inner_r = 20;
+    this.outer_r = r;
+    this.inner_r = 0.5 * r;
     this.pos = pos;
     this.outer.attr("fill", "black");
     this.inner.attr("fill", "lightgrey");
     this.arc.attr("fill", "green");
     this.text = this.g.append("text").text(text);
-    this._update(this.pos, this.outer_r, this.inner_r, this.p);
+    this.redraw(transform)
   }
 
   redraw(transform) {
@@ -30,6 +46,15 @@ class TaskDrawer {
     const ly = t.applyY(this.pos.y);
 
     this._update(new V2(lx, ly), this.outer_r * t.k, this.inner_r * t.k, this.p)
+  }
+
+  selected(on) {
+    this._selected = on;
+    if (this._selected) {
+      this.inner.attr("fill", "yellow")
+    } else {
+      this.inner.attr("fill", "lightgrey")
+    }
   }
 
   _update(pos, or, ir, p) { 
@@ -89,20 +114,32 @@ class LineDrawer {
   }
 }
 
-function prepare(tasks) {
-  var levels = buildLevels(tasks, (o) => o[0])
+function prepare(tasks, bindings) {
+  const depthsRaw = topSort(tasks, (v) => { 
+    return bindings.filter(p => p[0] == v[1]).map(p => tasks[p[1] - 1])
+  });
+
+  var d = Array.from(depthsRaw);
+  d.sort((a, b) => a[1].depth - b[1].depth)
+
+  for (var v of d) {
+    console.log(v[0], v[1]);
+  }
+
+  var levels = buildLevels(d, (o) => -o[1].depth)
   const levelSizes = levels.map(l => l.length)
   const cs = levelsToCoordinates(new Rect(0, 0, 900, 700), levelSizes);
   levels = levels.map((level, i) => {
     return level.map((el, j) => {
-      return [el, cs.at(i).at(j)]
+      return [el[0], cs.at(i).at(j)]
     });
   });
   levels = levels.flat();
+  console.log(levels)
   return levels;
 }
 
-window.onload = (e) => {
+function example() {
   const levelsRaw = [
     [0, 1], [0, 2], 
     [1, 3], [1, 4], [1, 5], [1, 6], 
@@ -110,11 +147,46 @@ window.onload = (e) => {
     [3, 11]
   ];
 
-  var levels = prepare(levelsRaw)
+  var bindings = [
+    [1, 6],
+    [1, 3],
+    [2, 4],
+    [2, 3],
+    [3, 7],
+    [4, 7],
+    [5, 8],
+    [6, 8],
+    [7, 11],
+    [8, 11],
+    [9, 11],
+    [10, 11]
+  ];
+}
+
+window.onload = (e) => {
+  var n = 10;
+  var p = 0.6;
+  var r = 5;
+  var levelsRaw = []
+  for (var i = 1; i <= n; ++i) {
+    levelsRaw.push([0, i]);
+  }
+
+  var bindings = []
+  for (var i = 1; i <= n; ++i) {
+    for (var j = i + 1; j <= n; ++j) {
+      if (Math.random() > p) {
+        bindings.push([i, j])
+      }
+    }
+  }
+
+  var transform = d3.zoomIdentity
+
+  var levels = prepare(levelsRaw, bindings)
   const points = levels.map((l) => l[1])
   const progress = [ 70, 50, 10, 20, 90, 10, 10, 10, 10, 10, 10 ]
 
-  const r = 10;
   var size = points.reduce(
       (a, b) => new V2(Math.max(a.x, b.x), Math.max(a.y, b.y)), 
       new V2(-Infinity, -Infinity)).add(new V2(r, r));
@@ -136,29 +208,20 @@ window.onload = (e) => {
   const viewport = svg.append('g')
     .attr("clip-path", "url(#clip)")
 
-  const bindings = [
-    [0, 5],
-    [0, 2],
-    [1, 3],
-    [1, 2],
-    [2, 6],
-    [3, 6],
-    [4, 7],
-    [5, 7],
-    [7, 10],
-    [6, 10],
-    [8, 10],
-    [9, 10]
-  ]
-
   var linesGroup = viewport.append("g");
   var circlesGroup = viewport.append("g");
-  console.log(levels)
-  var circles = levels.map((p, i) => new TaskDrawer(circlesGroup, p[1], (i % 10) / 10, i));
+  var circles = levels.map((p, i) => new TaskDrawer(circlesGroup, p[1], (i % 10) / 10, p[0][1], r, transform));
+  var id2circle = function() {
+    var map = new Map();
+    levels.forEach((l, i) => map.set(l[0][1], circles[i]));
+    return map;
+  }();
   var lines = bindings.map((b, i) => 
-    new LineDrawer(linesGroup, circles[b[0]].pos, circles[b[1]].pos))
+    new LineDrawer(linesGroup, id2circle.get(b[0]).pos, id2circle.get(b[1]).pos))
+
 
   const update = () => {
+    transform = d3.event.transform
     const t = d3.event.transform;
     const k = t.k;
     circles.forEach(c => c.redraw(t))
@@ -174,8 +237,7 @@ window.onload = (e) => {
     .on('click', () => {
       if (d3.event.target.tagName == "svg") {
         const e = d3.event;
-        console.log(d3.event)
-        const task = new TaskDrawer(circlesGroup, new V2(e.x, e.y), 0.7, '!');
+        const task = new TaskDrawer(circlesGroup, new V2(e.x, e.y), 0.7, '!', r, transform);
         circles.push(task)
       }
     });
