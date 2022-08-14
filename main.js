@@ -19,12 +19,16 @@ class Events {
   }
 }
 
-class TaskDrawer {
-  constructor(root, pos, progress, text, r, transform) {
+class TaskDrawer extends EventTarget {
+  constructor(root, pos, progress, text, r, transform, data) {
+    super();
+    this.data = data
     this.p = progress
     this.g = root.append("g")
       .on('click', () => {
         this.selected(!this._selected)
+        const e = new CustomEvent('select', { detail: this});
+        this.dispatchEvent(e);
       });
     this.outer = this.g.append("circle");
     this.arc = this.g.append("path")
@@ -36,6 +40,7 @@ class TaskDrawer {
     this.outer.attr("fill", "black");
     this.inner.attr("fill", "lightgrey");
     this.arc.attr("fill", "green");
+    this.raw_text = text
     this.text = this.g.append("text").text(text);
     this.redraw(transform)
   }
@@ -46,6 +51,11 @@ class TaskDrawer {
     const ly = t.applyY(this.pos.y);
 
     this._update(new V2(lx, ly), this.outer_r * t.k, this.inner_r * t.k, this.p)
+  }
+
+  setPosition(pos, transform) {
+    this.pos = pos
+    redraw(transform)
   }
 
   selected(on) {
@@ -115,6 +125,7 @@ class LineDrawer {
 }
 
 function prepare(tasks, bindings) {
+  console.log(tasks)
   const depthsRaw = topSort(tasks, (v) => { 
     return bindings.filter(p => p[0] == v[1]).map(p => tasks[p[1] - 1])
   });
@@ -163,7 +174,116 @@ function example() {
   ];
 }
 
-window.onload = (e) => {
+class Graph {
+  constructor(vs, es) {
+    this.vertices = vs
+    this.edges = es
+  }
+}
+
+class Renderer extends EventTarget {
+  constructor() {
+    super();
+    const size = new V2(1800, 1800);
+    this.circles = []
+    this.lines = []
+
+    this.selectedItems = new Set();
+
+    this.svg = d3.select("body")
+      .append("svg")
+      .attr("width", size.x)
+      .attr("height", size.y)
+
+    this.clip = this.svg.append("defs").append("SVG:clipPath")
+        .attr("id", "clip")
+        .append("SVG:rect")
+        .attr("width", size.x)
+        .attr("height", size.y)
+        .attr("x", 0)
+        .attr("y", 0);
+
+    this.viewport = this.svg.append('g')
+      .attr("clip-path", "url(#clip)")
+
+    this.linesGroup = this.viewport.append("g");
+    this.circlesGroup = this.viewport.append("g");
+    this.transform = d3.zoomIdentity;
+
+    const update = () => {
+      this.transform = d3.event.transform;
+      this.redraw();
+    }
+
+    const zoom = d3.zoom()
+      .scaleExtent([.5, 20])  // This control how much you can unzoom (x0.5) and zoom (x20)
+      .extent([[0, 0], [size.x, size.y]])
+      .on("zoom", update);
+
+    this.svg.call(zoom)
+      .on('click', () => {
+        if (d3.event.target.tagName == "svg") {
+          console.log('create!')
+
+          const id = this.nextId;
+          this.nextId += 1
+          this.graph.vertices.push([0, id]);
+          for (var selection of this.selectedItems) {
+            this.graph.edges.push([selection.data[0][1], id]);
+          }
+
+          this.renderGraph(this.graph);
+
+          for (var selection of this.selectedItems) {
+            selection.selected(false)
+          }
+          this.selectedItems.clear()
+          this.redraw();
+        }
+      });
+  }
+
+  redraw() {
+    this.circles.forEach(c => c.redraw(this.transform))
+    this.lines.forEach(c => c.redraw(this.transform))
+  }
+
+  renderGraph(graph) {
+    this.graph = graph;
+    this.nextId = this.graph.vertices.reduce((a, b) => Math.max(a, b[1]) + 1, -Infinity)
+    var levels = prepare(graph.vertices, graph.edges);
+    console.log("levels", levels);
+
+    const r = 20;
+    this.circlesGroup.html("")
+    this.linesGroup.html("")
+    this.circles = levels.map((p, i) => {
+      const e = new TaskDrawer(this.circlesGroup, p[1], (i % 10) / 10, p[0][1], r, this.transform, p);
+      e.addEventListener('select', (e) => { 
+        if (e.detail._selected) {
+          this.selectedItems.add(e.detail)
+        } else {
+          this.selectedItems.delete(e.detail)
+        }
+        console.log(Array.from(this.selectedItems).map(e => e.raw_text)); 
+      })
+      return e;
+    });
+
+    var id2circle = (() => {
+      var map = new Map();
+      levels.forEach((l, i) => map.set(l[0][1], this.circles[i]));
+      return map;
+    })();
+    console.log(id2circle)
+    console.log(graph.edges)
+    this.lines = graph.edges.map((b, i) => {
+      return new LineDrawer(this.linesGroup, id2circle.get(b[0]).pos, id2circle.get(b[1]).pos)
+    })
+  }
+}
+
+function createGraph() {
   var n = 10;
   var p = 0.6;
   var r = 5;
@@ -180,65 +300,12 @@ window.onload = (e) => {
       }
     }
   }
+  return new Graph(levelsRaw, bindings)
+}
 
-  var transform = d3.zoomIdentity
-
-  var levels = prepare(levelsRaw, bindings)
-  const points = levels.map((l) => l[1])
-  const progress = [ 70, 50, 10, 20, 90, 10, 10, 10, 10, 10, 10 ]
-
-  var size = points.reduce(
-      (a, b) => new V2(Math.max(a.x, b.x), Math.max(a.y, b.y)), 
-      new V2(-Infinity, -Infinity)).add(new V2(r, r));
-  size = new V2(size.x * 2, size.y * 2)
-
-  var svg = d3.select("body")
-    .append("svg")
-    .attr("width", size.x)
-    .attr("height", size.y)
-
-  var clip = svg.append("defs").append("SVG:clipPath")
-      .attr("id", "clip")
-      .append("SVG:rect")
-      .attr("width", size.x)
-      .attr("height", size.y)
-      .attr("x", 0)
-      .attr("y", 0);
-
-  const viewport = svg.append('g')
-    .attr("clip-path", "url(#clip)")
-
-  var linesGroup = viewport.append("g");
-  var circlesGroup = viewport.append("g");
-  var circles = levels.map((p, i) => new TaskDrawer(circlesGroup, p[1], (i % 10) / 10, p[0][1], r, transform));
-  var id2circle = function() {
-    var map = new Map();
-    levels.forEach((l, i) => map.set(l[0][1], circles[i]));
-    return map;
-  }();
-  var lines = bindings.map((b, i) => 
-    new LineDrawer(linesGroup, id2circle.get(b[0]).pos, id2circle.get(b[1]).pos))
-
-
-  const update = () => {
-    transform = d3.event.transform
-    const t = d3.event.transform;
-    const k = t.k;
-    circles.forEach(c => c.redraw(t))
-    lines.forEach(c => c.redraw(t))
-  }
-
-  const zoom = d3.zoom()
-    .scaleExtent([.5, 20])  // This control how much you can unzoom (x0.5) and zoom (x20)
-    .extent([[0, 0], [size.x, size.y]])
-    .on("zoom", update);
-
-  svg.call(zoom)
-    .on('click', () => {
-      if (d3.event.target.tagName == "svg") {
-        const e = d3.event;
-        const task = new TaskDrawer(circlesGroup, new V2(e.x, e.y), 0.7, '!', r, transform);
-        circles.push(task)
-      }
-    });
+window.onload = (e) => {
+  var graph = createGraph();
+  console.log(graph.vertices)
+  var renderer = new Renderer();
+  renderer.renderGraph(graph);
 }
